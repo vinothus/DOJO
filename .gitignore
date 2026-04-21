@@ -1,0 +1,5 @@
+remote1/
+remote2/
+
+# Local secrets (do not publish)
+workflow-pms/deploy/credentials.txt

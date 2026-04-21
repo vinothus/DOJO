@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: workflow
+      POSTGRES_PASSWORD: workflow
+      POSTGRES_DB: workflow_pms
+    ports:
+      - "5432:5432"
+    volumes:
+      - workflow_pms_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workflow -d workflow_pms"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://workflow:workflow@postgres:5432/workflow_pms?schema=public
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-must-be-at-least-32-chars-long}
+      FILE_STORAGE_PATH: /data/uploads
+      # Set CORS_ORIGIN in workflow-pms/.env for remote UI (e.g. http://PUBLIC_IP:8082)
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8082,http://localhost:5173}
+    volumes:
+      - workflow_pms_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8082:80"
+    depends_on:
+      - api
+
+  adminer:
+    image: adminer:4
+    ports:
+      # avoid clashing with other stacks on 8080; use 18080 on host
+      - "18080:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  workflow_pms_pg:
+  workflow_pms_uploads:

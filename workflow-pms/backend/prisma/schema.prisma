@@ -1,0 +1,297 @@
+// Workflow PMS — core domain (PRD-aligned)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkflowStage {
+  INPUT_SITE_MEASUREMENT
+  DESIGNING_ENGINEERING
+  COORDINATION
+  FABRICATION_SHOP
+  MACHINING_SHOP
+  WAREHOUSE_STORE
+  TRANSPORT
+  SITE_INSTALLATION
+  INVOICE
+}
+
+enum TripMode {
+  ONE_WAY
+  ROUND_TRIP
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  roles           UserRole[]
+  projectsCreated Project[]      @relation("ProjectCreator")
+  auditLogs       AuditLog[]
+  attachments     Attachment[]   @relation("UserAttachments")
+
+  @@map("users")
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users          UserRole[]
+  stageAccess    RoleStageAccess[]
+
+  @@map("roles")
+}
+
+/// Singleton row — workspace rules (JSON). Edited via Admin settings UI.
+model SystemSettings {
+  id        String   @id @default("default")
+  workspace Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+/// Per-role access to each workflow stage (Admin seeded with all edit+override)
+model RoleStageAccess {
+  id          String        @id @default(uuid())
+  roleId      String        @map("role_id")
+  stage       WorkflowStage
+  canView     Boolean       @default(true) @map("can_view")
+  canEdit     Boolean       @default(false) @map("can_edit")
+  canOverride Boolean       @default(false) @map("can_override")
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, stage])
+  @@map("role_stage_access")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  projectName String?       @map("project_name")
+  year        Int?
+  month       Int?
+  area        String?
+  client      String?
+  plant       String?
+  poNumber   String?       @map("po_number")
+  projectId  String        @map("project_id_string")
+  bidNumber  String?       @map("bid_number")
+  status     ProjectStatus @default(ACTIVE)
+  createdById String?      @map("created_by_id")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  createdBy User?      @relation("ProjectCreator", fields: [createdById], references: [id])
+  lineItems LineItem[]
+
+  @@unique([projectId])
+  @@map("projects")
+}
+
+model LineItem {
+  id                  String        @id @default(uuid())
+  projectId           String        @map("project_id")
+  inputDrawingNumber  String?       @map("input_drawing_number")
+  drawingNumber       String?       @map("drawing_number")
+  sheetNo             String?       @map("sheet_no")
+  revNo               String?       @map("rev_no")
+  clampType           String?       @map("clamp_type")
+  material            String?
+  description         String?
+  qty                 Decimal?      @db.Decimal(18, 4)
+  unitWeight          Decimal?      @map("unit_weight") @db.Decimal(18, 4)
+  totalWeight         Decimal?      @map("total_weight") @db.Decimal(18, 4)
+  measurementDate     DateTime?     @map("measurement_date") @db.Date
+  targetDate          DateTime?     @map("target_date") @db.Date
+  currentStage        WorkflowStage @map("current_stage")
+  /// Invoice amount in SAR (filled at INVOICE stage)
+  invoiceAmountSar    Decimal?      @map("invoice_amount_sar") @db.Decimal(18, 4)
+  /// Extra RFQ / spreadsheet columns (temps, pressures, fab steps, WBS, etc.)
+  technicalDetails    Json?         @map("technical_details")
+  /** Co-ordinator stage (between Engineering and Fabrication) */
+  coordDesignRequestedAt      DateTime? @map("coord_design_requested_at") @db.Date
+  coordEngineeringSubmittedAt DateTime? @map("coord_engineering_submitted_at") @db.Date
+  coordApprovalStatus         String?   @map("coord_approval_status")
+  coordDescription            String?   @map("coord_description")
+  version             Int           @default(1)
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manHours     ManHourEntry[]
+  travelRows   TravelEntry[]
+  bomLines     BomLine[]
+  attachments  Attachment[] @relation("LineItemAttachments")
+
+  @@index([projectId])
+  @@map("line_items")
+}
+
+/// Unified man-hour rows (all stages); stage-specific columns optional
+model ManHourEntry {
+  id           String        @id @default(uuid())
+  lineItemId   String        @map("line_id")
+  stage        WorkflowStage
+  year         Int?
+  month        Int?
+  shift        String?
+  workDate     DateTime?     @map("work_date") @db.Date
+  idNumber     String?       @map("id_number")
+  category     String?
+  employeeName String?       @map("employee_name")
+  normalHours  Decimal?      @map("normal_hours") @db.Decimal(10, 2)
+  otHours      Decimal?      @map("ot_hours") @db.Decimal(10, 2)
+  totalHours   Decimal?      @map("total_hours") @db.Decimal(10, 2)
+  jobStatus    String?       @map("job_status")
+  approvalStatus String?     @map("approval_status")
+  jobDescription String?     @map("job_description")
+  rework         String?
+  version      Int           @default(1)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@index([lineItemId, stage])
+  @@map("man_hour_entries")
+}
+
+model TravelEntry {
+  id           String        @id @default(uuid())
+  lineItemId   String        @map("line_id")
+  stage        WorkflowStage // SITE input travel vs TRANSPORT delivery trips vs FAB yard-shop
+  shift        String?
+  workDate     DateTime?     @map("work_date") @db.Date
+  tripLabel    String?       @map("trip_label")
+  vehicleType  String?       @map("vehicle_type")
+  tripMode     TripMode?     @map("trip_mode")
+  travelHours  Decimal?      @map("travel_hours") @db.Decimal(10, 2)
+  oneWayKm     Decimal?      @map("one_way_km") @db.Decimal(12, 2)
+  roundTripKm  Decimal?      @map("round_trip_km") @db.Decimal(12, 2)
+  jobStatus    String?       @map("job_status")
+  version      Int           @default(1)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@index([lineItemId])
+  @@map("travel_entries")
+}
+
+model BomLine {
+  id           String   @id @default(uuid())
+  lineItemId   String   @map("line_id")
+  year         Int?
+  month        Int?
+  description  String?
+  qty          Decimal? @db.Decimal(18, 4)
+  materialSpec String?  @map("material_spec")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@map("bom_lines")
+}
+
+model LookupType {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  values LookupValue[]
+
+  @@map("lookup_types")
+}
+
+model LookupValue {
+  id            String   @id @default(uuid())
+  lookupTypeId  String   @map("lookup_type_id")
+  value         String
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  lookupType LookupType @relation(fields: [lookupTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([lookupTypeId, value])
+  @@map("lookup_values")
+}
+
+model Attachment {
+  id         String        @id @default(uuid())
+  lineItemId String        @map("line_id")
+  stage      WorkflowStage
+  filePath   String        @map("file_path")
+  fileName   String        @map("file_name")
+  mime       String?
+  sizeBytes  Int           @map("size_bytes")
+  uploadedById String?    @map("uploaded_by_id")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  lineItem   LineItem @relation("LineItemAttachments", fields: [lineItemId], references: [id], onDelete: Cascade)
+  uploadedBy User?   @relation("UserAttachments", fields: [uploadedById], references: [id])
+
+  @@map("attachments")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  payload    Json?
+  userId     String?  @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model RateCard {
+  id         String   @id @default(uuid())
+  name       String
+  category   String?
+  vehicleType String? @map("vehicle_type")
+  hourlyRate Decimal? @map("hourly_rate") @db.Decimal(18, 4)
+  fuelPerKm  Decimal? @map("fuel_per_km") @db.Decimal(18, 4)
+  activeFrom DateTime? @map("active_from") @db.Date
+  activeTo   DateTime? @map("active_to") @db.Date
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("rate_cards")
+}

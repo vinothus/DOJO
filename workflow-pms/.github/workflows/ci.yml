@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: workflow-pms/backend/package-lock.json
+
+      - name: Backend — install & build
+        working-directory: workflow-pms/backend
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: workflow-pms/frontend/package-lock.json
+
+      - name: Frontend — install & build
+        working-directory: workflow-pms/frontend
+        run: |
+          npm ci
+          npm run build

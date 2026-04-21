@@ -1,0 +1,8 @@
+{
+  "name": "workflow-pms",
+  "private": true,
+  "description": "Root scripts — apps live in backend/ and frontend/",
+  "scripts": {
+    "e2e": "node scripts/e2e-docker.mjs"
+  }
+}
