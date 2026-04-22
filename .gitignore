@@ -3,3 +3,8 @@ remote2/
 
 # Local secrets (do not publish)
 workflow-pms/deploy/credentials.txt
+workflow-pms/deploy/remote.config.json
+workflow-pms/deploy/remote.config.ps1
+
+# Packaged deploy upload (regenerate for deploy, do not commit)
+/workflow-pms-deploy.tar

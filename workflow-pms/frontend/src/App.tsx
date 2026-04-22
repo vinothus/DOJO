@@ -70,7 +70,14 @@ function AppRoutes() {
         <Route path="/" element={<ProjectsPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/olls/stats" element={<OllsStatsPage />} />
-        <Route path="/olls/cost" element={<OllsCostPage />} />
+        <Route
+          path="/olls/cost"
+          element={
+            <RequireAdmin>
+              <OllsCostPage />
+            </RequireAdmin>
+          }
+        />
         <Route
           path="/projects/new"
           element={

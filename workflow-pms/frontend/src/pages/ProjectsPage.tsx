@@ -468,9 +468,21 @@ export function ProjectsPage() {
                           />
                         )}
                       <Chip
-                        label={p.status === 'ARCHIVED' ? 'Archived' : p.status}
+                        label={
+                          p.status === 'ARCHIVED'
+                            ? 'Archived'
+                            : p.status === 'COMPLETE'
+                              ? 'Complete'
+                              : 'Active'
+                        }
                         size="small"
-                        color={p.status === 'ARCHIVED' ? 'default' : 'primary'}
+                        color={
+                          p.status === 'ARCHIVED'
+                            ? 'default'
+                            : p.status === 'COMPLETE'
+                              ? 'info'
+                              : 'primary'
+                        }
                         variant={p.status === 'ARCHIVED' ? 'filled' : 'outlined'}
                       />
                     </Box>

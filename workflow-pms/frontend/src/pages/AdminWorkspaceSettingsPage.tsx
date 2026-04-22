@@ -25,7 +25,10 @@ import type {
   HandoverTransitionRule,
   ProjectHeaderHandoverKeys,
   WorkspaceSettingsV1,
+  WorkspaceTabAccessMode,
+  WorkspaceTabKey,
 } from '../settings/workspaceTypes';
+import { tabOrder, WORKSPACE_TAB_LABEL } from '../settings/workspaceTypes';
 import { ALL_STAGES, STAGE_LABEL, type WorkflowStage } from '../types';
 
 const HEADER_KEYS: { key: ProjectHeaderHandoverKeys; label: string }[] = [
@@ -42,6 +45,26 @@ const HEADER_KEYS: { key: ProjectHeaderHandoverKeys; label: string }[] = [
 const SITE_TAB_KEYS: { key: 'bom'; label: string }[] = [
   { key: 'bom', label: 'BOM tab visible at site measurement stage' },
 ];
+
+const ROLE_TAB_ROLE_OPTIONS: { id: string; label: string }[] = [
+  { id: 'site_measurement', label: 'Site (measurement)' },
+  { id: 'engineering', label: 'Engineering' },
+  { id: 'coordinator', label: 'Co-ordination' },
+  { id: 'fab_shop', label: 'Fabrication shop' },
+  { id: 'machining', label: 'Machining' },
+  { id: 'warehouse', label: 'Warehouse / store' },
+  { id: 'transport', label: 'Transport' },
+  { id: 'site_installation', label: 'Site installation' },
+  { id: 'invoice', label: 'Invoice' },
+];
+
+function getRoleTab(
+  s: WorkspaceSettingsV1,
+  role: string,
+  tab: WorkspaceTabKey,
+): WorkspaceTabAccessMode {
+  return s.roleTabAccess?.[role]?.[tab] ?? 'inherit';
+}
 
 const HANDOVER_KEYS = ALL_STAGES.slice(0, -1).map((from, i) => {
   const to = ALL_STAGES[i + 1]!;
@@ -237,6 +260,69 @@ export function AdminWorkspaceSettingsPage() {
           ))}
         </Stack>
       </Paper>
+
+      <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography sx={{ fontWeight: 600 }}>Job workspace tabs by role</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Control which job workspace tabs each role can see. <strong>Inherit</strong> keeps the usual
+            behavior (stage-based visibility and workflow rules). If you set any tab to something other
+            than Inherit for a role, that role&apos;s <strong>unspecified</strong> tabs are treated as
+            <strong> Hidden</strong>. <strong>View</strong> shows the tab but disables editing.
+            Admins are not listed; they always have full access to all tabs.
+          </Typography>
+          <Stack spacing={2}>
+            {ROLE_TAB_ROLE_OPTIONS.map((role) => (
+              <Paper key={role.id} variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
+                  {role.label} ({role.id})
+                </Typography>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' },
+                    gap: 1.5,
+                  }}
+                >
+                  {tabOrder().map((tab) => (
+                    <FormControl key={tab} size="small" fullWidth>
+                      <InputLabel id={`${role.id}-${tab}-lbl`}>
+                        {WORKSPACE_TAB_LABEL[tab]}
+                      </InputLabel>
+                      <Select
+                        labelId={`${role.id}-${tab}-lbl`}
+                        label={WORKSPACE_TAB_LABEL[tab]}
+                        value={getRoleTab(draft, role.id, tab)}
+                        onChange={(e) => {
+                          const v = e.target.value as WorkspaceTabAccessMode;
+                          setDraft((d) => {
+                            if (!d) return d;
+                            const prevR = d.roleTabAccess?.[role.id] ?? {};
+                            return {
+                              ...d,
+                              roleTabAccess: {
+                                ...d.roleTabAccess,
+                                [role.id]: { ...prevR, [tab]: v },
+                              },
+                            };
+                          });
+                        }}
+                      >
+                        <MenuItem value="inherit">Inherit (default)</MenuItem>
+                        <MenuItem value="hidden">Hidden</MenuItem>
+                        <MenuItem value="view">View</MenuItem>
+                        <MenuItem value="edit">Edit</MenuItem>
+                      </Select>
+                    </FormControl>
+                  ))}
+                </Box>
+              </Paper>
+            ))}
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
         Per handover (transition)

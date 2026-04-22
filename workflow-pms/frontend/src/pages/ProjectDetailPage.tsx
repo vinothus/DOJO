@@ -10,7 +10,9 @@ import {
   FormControl,
   InputLabel,
   MenuItem,
+  Checkbox,
   Chip,
+  FormControlLabel,
   Paper,
   Select,
   Table,
@@ -104,6 +106,7 @@ export function ProjectDetailPage() {
   const [overrideOpen, setOverrideOpen] = useState<LineItem | null>(null);
   const [targetStage, setTargetStage] = useState<WorkflowStage>('INPUT_SITE_MEASUREMENT');
   const [overrideReason, setOverrideReason] = useState('');
+  const [markProjectCompleteOnOverride, setMarkProjectCompleteOnOverride] = useState(false);
   const [projectEdit, setProjectEdit] = useState({
     projectName: '',
     year: '' as number | '',
@@ -167,23 +170,29 @@ export function ProjectDetailPage() {
       targetStage: ts,
       reason,
       version,
+      markProjectComplete,
     }: {
       lineId: string;
       targetStage: WorkflowStage;
       reason: string;
       version: number;
+      markProjectComplete?: boolean;
     }) => {
       await api.post(`/line-items/${lineId}/stage-override`, {
         targetStage: ts,
         reason,
         version,
+        markProjectComplete,
       });
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
       if (vars?.lineId) qc.invalidateQueries({ queryKey: ['line-audit', vars.lineId] });
       setOverrideOpen(null);
       setOverrideReason('');
+      setMarkProjectCompleteOnOverride(false);
     },
   });
 
@@ -236,8 +245,20 @@ export function ProjectDetailPage() {
         </Button>
         <Chip
           size="small"
-          label={project.status === 'ARCHIVED' ? 'Archived' : 'Active'}
-          color={project.status === 'ARCHIVED' ? 'default' : 'success'}
+          label={
+            project.status === 'ARCHIVED'
+              ? 'Archived'
+              : project.status === 'COMPLETE'
+                ? 'Complete'
+                : 'Active'
+          }
+          color={
+            project.status === 'ARCHIVED'
+              ? 'default'
+              : project.status === 'COMPLETE'
+                ? 'info'
+                : 'success'
+          }
         />
       </Box>
       <Typography variant="h5" sx={{ fontWeight: 600, fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
@@ -598,7 +619,10 @@ export function ProjectDetailPage() {
 
       <Dialog
         open={!!overrideOpen}
-        onClose={() => setOverrideOpen(null)}
+        onClose={() => {
+          setOverrideOpen(null);
+          setMarkProjectCompleteOnOverride(false);
+        }}
         maxWidth="xs"
         fullWidth
       >
@@ -633,10 +657,29 @@ export function ProjectDetailPage() {
             minRows={2}
             value={overrideReason}
             onChange={(e) => setOverrideReason(e.target.value)}
+            sx={{ mb: 1 }}
           />
+          {isAdmin && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={markProjectCompleteOnOverride}
+                  onChange={(_, c) => setMarkProjectCompleteOnOverride(c)}
+                />
+              }
+              label="Mark project complete"
+            />
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOverrideOpen(null)}>Cancel</Button>
+          <Button
+            onClick={() => {
+              setOverrideOpen(null);
+              setMarkProjectCompleteOnOverride(false);
+            }}
+          >
+            Cancel
+          </Button>
           <Button
             variant="contained"
             disabled={
@@ -651,6 +694,7 @@ export function ProjectDetailPage() {
                 targetStage,
                 reason: overrideReason.trim(),
                 version: overrideOpen.version,
+                markProjectComplete: isAdmin ? markProjectCompleteOnOverride : undefined,
               });
             }}
           >

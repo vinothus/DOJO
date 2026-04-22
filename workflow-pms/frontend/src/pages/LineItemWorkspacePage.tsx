@@ -37,7 +37,9 @@ import { Link as RouterLink, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import {
-  visibleWorkspaceTabs,
+  mergeTabAccessForUser,
+  visibleWorkspaceTabsForUser,
+  WORKSPACE_TAB_LABEL,
   type WorkspaceTabKey,
   type WorkspaceSettingsV1,
 } from '../settings/workspaceTypes';
@@ -49,16 +51,6 @@ import {
 } from '../utils/workflowRoles';
 
 const VEHICLE_TYPE_OPTIONS = ['Pickup', 'Cargo', 'Full truck', 'Trailer'] as const;
-
-const TAB_LABEL: Record<WorkspaceTabKey, string> = {
-  lineDetails: 'Job details',
-  manHours: 'Man hours',
-  travel: 'Travel',
-  bom: 'BOM',
-  attachments: 'Attachments',
-  coordination: 'Co-ordination',
-  technical: 'Technical / RFQ',
-};
 
 type TravelRow = {
   id: string;
@@ -230,6 +222,34 @@ function auditActionLabel(action: string): string {
   return ACTION_LABEL[action] ?? action.replace(/_/g, ' ');
 }
 
+/** Who / when come from columns; this surfaces what changed from audit payload */
+function auditDetailsShort(action: string, payload: unknown): string {
+  if (payload == null || typeof payload !== 'object') return '—';
+  const p = payload as Record<string, unknown>;
+  if (action === 'LINE_SAVE') {
+    const summary = p.changeSummary as string[] | undefined;
+    if (summary?.length) return summary.join(', ');
+    const vb = p.versionBefore;
+    const va = p.version;
+    if (typeof vb === 'number' && typeof va === 'number') {
+      return `v${vb} → v${va} (no field diffs)`;
+    }
+    return '—';
+  }
+  if (action === 'HANDOVER' && typeof p.toStage === 'string') {
+    return `→ ${STAGE_LABEL[p.toStage as WorkflowStage] ?? p.toStage}`;
+  }
+  if (action === 'STAGE_OVERRIDE') {
+    const parts: string[] = [];
+    if (typeof p.toStage === 'string') {
+      parts.push(`→ ${STAGE_LABEL[p.toStage as WorkflowStage] ?? p.toStage}`);
+    }
+    if (p.markProjectComplete === true) parts.push('project marked complete');
+    if (parts.length) return parts.join(' · ');
+  }
+  return '—';
+}
+
 export function LineItemWorkspacePage() {
   const { projectId, lineId } = useParams<{ projectId: string; lineId: string }>();
   const qc = useQueryClient();
@@ -321,10 +341,13 @@ export function LineItemWorkspacePage() {
   const visibleTabs = useMemo(
     () =>
       line
-        ? visibleWorkspaceTabs(workspace, line.currentStage)
+        ? visibleWorkspaceTabsForUser(workspace, line.currentStage, roles)
         : (['lineDetails'] as WorkspaceTabKey[]),
-    [line, workspace],
+    [line, workspace, roles],
   );
+
+  const readOnlyTab = (t: WorkspaceTabKey) =>
+    mergeTabAccessForUser(workspace, roles, t) === 'view';
 
   useEffect(() => {
     if (!visibleTabs.length) return;
@@ -532,8 +555,18 @@ export function LineItemWorkspacePage() {
     );
   }
 
-  const headerOk = canEditLineHeader(roles, line.currentStage);
-  const techOk = canEditWorkflowStage(roles, line.currentStage) || isAdmin;
+  const lineDetailsCanEdit = canEditLineHeader(roles, line.currentStage);
+  const headerOk = lineDetailsCanEdit && !readOnlyTab('lineDetails');
+  const techOk =
+    (canEditWorkflowStage(roles, line.currentStage) || isAdmin) && !readOnlyTab('technical');
+  const coordOk = lineDetailsCanEdit && !readOnlyTab('coordination');
+  const mhEdit = (stage: WorkflowStage) =>
+    (canEditWorkflowStage(roles, stage) || isAdmin) && !readOnlyTab('manHours');
+  const tvEdit = (stage: WorkflowStage) =>
+    (canEditWorkflowStage(roles, stage) || isAdmin) && !readOnlyTab('travel');
+  const bomEditable = canAddBom(roles) && !readOnlyTab('bom');
+  const attEdit = (stage: WorkflowStage) =>
+    (canEditWorkflowStage(roles, stage) || isAdmin) && !readOnlyTab('attachments');
   const projectLabel = line.project.projectName || line.project.projectId;
 
   return (
@@ -594,6 +627,7 @@ export function LineItemWorkspacePage() {
                     <TableCell>When</TableCell>
                     <TableCell>Who</TableCell>
                     <TableCell>Action</TableCell>
+                    <TableCell>What changed</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -606,6 +640,9 @@ export function LineItemWorkspacePage() {
                         {a.user?.name ?? a.user?.email ?? '—'}
                       </TableCell>
                       <TableCell>{auditActionLabel(a.action)}</TableCell>
+                      <TableCell sx={{ maxWidth: 280, wordBreak: 'break-word' }}>
+                        {auditDetailsShort(a.action, a.payload)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -621,16 +658,21 @@ export function LineItemWorkspacePage() {
           allowScrollButtonsMobile
         >
           {visibleTabs.map((k) => (
-            <Tab key={k} label={TAB_LABEL[k]} value={k} />
+            <Tab key={k} label={WORKSPACE_TAB_LABEL[k]} value={k} />
           ))}
         </Tabs>
 
         {tabKey === 'lineDetails' && (
           <Paper sx={{ p: 3, borderRadius: 2 }}>
-            {!headerOk && (
+            {!lineDetailsCanEdit && (
               <Alert severity="info" sx={{ mb: 2 }}>
                 Job header can be edited when the job is in your department stage (or as admin).
                 Current stage: {STAGE_LABEL[line.currentStage]}.
+              </Alert>
+            )}
+            {readOnlyTab('lineDetails') && lineDetailsCanEdit && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This tab is view-only for your role.
               </Alert>
             )}
             <Stack spacing={2} useFlexGap>
@@ -778,7 +820,7 @@ export function LineItemWorkspacePage() {
                   }
                 >
                   {ALL_STAGES.map((s) => (
-                    <MenuItem key={s} value={s} disabled={!canEditWorkflowStage(roles, s) && !isAdmin}>
+                    <MenuItem key={s} value={s} disabled={!mhEdit(s)}>
                       {STAGE_LABEL[s]}
                     </MenuItem>
                   ))}
@@ -790,26 +832,26 @@ export function LineItemWorkspacePage() {
                 slotProps={{ inputLabel: { shrink: true } }}
                 value={mhForm.workDate}
                 onChange={(e) => setMhForm({ ...mhForm, workDate: e.target.value })}
-                disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                disabled={!mhEdit(mhForm.stage)}
               />
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                 <TextField
                   label="Category"
                   value={mhForm.category}
                   onChange={(e) => setMhForm({ ...mhForm, category: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
                 <TextField
                   label="Employee name"
                   value={mhForm.employeeName}
                   onChange={(e) => setMhForm({ ...mhForm, employeeName: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
                 <TextField
                   label="ID no."
                   value={mhForm.idNumber}
                   onChange={(e) => setMhForm({ ...mhForm, idNumber: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
               </Stack>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -818,45 +860,45 @@ export function LineItemWorkspacePage() {
                   type="number"
                   value={mhForm.normalHours}
                   onChange={(e) => setMhForm({ ...mhForm, normalHours: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
                 <TextField
                   label="Overtime hours"
                   type="number"
                   value={mhForm.otHours}
                   onChange={(e) => setMhForm({ ...mhForm, otHours: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
                 <TextField
                   label="Total hours"
                   type="number"
                   value={mhForm.totalHours}
                   onChange={(e) => setMhForm({ ...mhForm, totalHours: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                  disabled={!mhEdit(mhForm.stage)}
                 />
               </Stack>
               <TextField
                 label="Job status"
                 value={mhForm.jobStatus}
                 onChange={(e) => setMhForm({ ...mhForm, jobStatus: e.target.value })}
-                disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                disabled={!mhEdit(mhForm.stage)}
               />
               <TextField
                 label="Approval status (e.g. engineering)"
                 value={mhForm.approvalStatus}
                 onChange={(e) => setMhForm({ ...mhForm, approvalStatus: e.target.value })}
-                disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                disabled={!mhEdit(mhForm.stage)}
               />
               <TextField
                 label="Job description"
                 value={mhForm.jobDescription}
                 onChange={(e) => setMhForm({ ...mhForm, jobDescription: e.target.value })}
-                disabled={!canEditWorkflowStage(roles, mhForm.stage) && !isAdmin}
+                disabled={!mhEdit(mhForm.stage)}
               />
               <Button
                 variant="contained"
                 disabled={
-                  !canEditWorkflowStage(roles, mhForm.stage) && !isAdmin ? true : addMh.isPending
+                  !mhEdit(mhForm.stage) ? true : addMh.isPending
                 }
                 onClick={() => addMh.mutate()}
               >
@@ -891,7 +933,7 @@ export function LineItemWorkspacePage() {
                     <TableCell>{String(r.totalHours ?? '')}</TableCell>
                     <TableCell>{r.jobStatus ?? '—'}</TableCell>
                     <TableCell align="right">
-                      {(canEditWorkflowStage(roles, r.stage) || isAdmin) && (
+                      {mhEdit(r.stage) && (
                         <IconButton size="small" onClick={() => delMh.mutate(r.id)} aria-label="delete">
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -920,7 +962,7 @@ export function LineItemWorkspacePage() {
                   }
                 >
                   {ALL_STAGES.map((s) => (
-                    <MenuItem key={s} value={s} disabled={!canEditWorkflowStage(roles, s) && !isAdmin}>
+                    <MenuItem key={s} value={s} disabled={!tvEdit(s)}>
                       {STAGE_LABEL[s]}
                     </MenuItem>
                   ))}
@@ -932,7 +974,7 @@ export function LineItemWorkspacePage() {
                 slotProps={{ inputLabel: { shrink: true } }}
                 value={tvForm.workDate}
                 onChange={(e) => setTvForm({ ...tvForm, workDate: e.target.value })}
-                disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                disabled={!tvEdit(tvForm.stage)}
               />
               <FormControl fullWidth>
                 <InputLabel>Vehicle type</InputLabel>
@@ -942,7 +984,7 @@ export function LineItemWorkspacePage() {
                   onChange={(e) =>
                     setTvForm({ ...tvForm, vehicleType: String(e.target.value) })
                   }
-                  disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                  disabled={!tvEdit(tvForm.stage)}
                 >
                   <MenuItem value="">
                     <em>Select…</em>
@@ -966,7 +1008,7 @@ export function LineItemWorkspacePage() {
                         tripMode: (e.target.value || '') as '' | 'ONE_WAY' | 'ROUND_TRIP',
                       })
                     }
-                    disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                    disabled={!tvEdit(tvForm.stage)}
                   >
                     <MenuItem value="">
                       <em>Optional</em>
@@ -980,7 +1022,7 @@ export function LineItemWorkspacePage() {
                   type="number"
                   value={tvForm.travelHours}
                   onChange={(e) => setTvForm({ ...tvForm, travelHours: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                  disabled={!tvEdit(tvForm.stage)}
                   fullWidth
                 />
               </Stack>
@@ -990,20 +1032,20 @@ export function LineItemWorkspacePage() {
                   type="number"
                   value={tvForm.oneWayKm}
                   onChange={(e) => setTvForm({ ...tvForm, oneWayKm: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                  disabled={!tvEdit(tvForm.stage)}
                 />
                 <TextField
                   label="Round trip (km)"
                   type="number"
                   value={tvForm.roundTripKm}
                   onChange={(e) => setTvForm({ ...tvForm, roundTripKm: e.target.value })}
-                  disabled={!canEditWorkflowStage(roles, tvForm.stage) && !isAdmin}
+                  disabled={!tvEdit(tvForm.stage)}
                 />
               </Stack>
               <Button
                 variant="contained"
                 disabled={
-                  !canEditWorkflowStage(roles, tvForm.stage) && !isAdmin ? true : addTv.isPending
+                  !tvEdit(tvForm.stage) ? true : addTv.isPending
                 }
                 onClick={() => addTv.mutate()}
               >
@@ -1043,7 +1085,7 @@ export function LineItemWorkspacePage() {
                       {r.roundTripKm ? ` rt:${Number(r.roundTripKm)}` : ''}
                     </TableCell>
                     <TableCell align="right">
-                      {(canEditWorkflowStage(roles, r.stage) || isAdmin) && (
+                      {tvEdit(r.stage) && (
                         <IconButton size="small" onClick={() => delTv.mutate(r.id)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -1068,24 +1110,24 @@ export function LineItemWorkspacePage() {
                 label="Description"
                 value={bomForm.description}
                 onChange={(e) => setBomForm({ ...bomForm, description: e.target.value })}
-                disabled={!canAddBom(roles)}
+                disabled={!bomEditable}
               />
               <TextField
                 label="Qty"
                 type="number"
                 value={bomForm.qty}
                 onChange={(e) => setBomForm({ ...bomForm, qty: e.target.value })}
-                disabled={!canAddBom(roles)}
+                disabled={!bomEditable}
               />
               <TextField
                 label="Material spec"
                 value={bomForm.materialSpec}
                 onChange={(e) => setBomForm({ ...bomForm, materialSpec: e.target.value })}
-                disabled={!canAddBom(roles)}
+                disabled={!bomEditable}
               />
               <Button
                 variant="contained"
-                disabled={!canAddBom(roles) || addBom.isPending}
+                disabled={!bomEditable || addBom.isPending}
                 onClick={() => addBom.mutate()}
               >
                 Add BOM row
@@ -1107,7 +1149,7 @@ export function LineItemWorkspacePage() {
                     <TableCell>{String(b.qty ?? '')}</TableCell>
                     <TableCell>{b.materialSpec ?? '—'}</TableCell>
                     <TableCell align="right">
-                      {(canAddBom(roles) || isAdmin) && (
+                      {bomEditable && (
                         <IconButton size="small" onClick={() => delBom.mutate(b.id)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -1164,7 +1206,7 @@ export function LineItemWorkspacePage() {
                   onChange={(e) => setAttStage(e.target.value as WorkflowStage)}
                 >
                   {ALL_STAGES.map((s) => (
-                    <MenuItem key={s} value={s} disabled={!canEditWorkflowStage(roles, s) && !isAdmin}>
+                    <MenuItem key={s} value={s} disabled={!attEdit(s)}>
                       {STAGE_LABEL[s]}
                     </MenuItem>
                   ))}
@@ -1184,9 +1226,7 @@ export function LineItemWorkspacePage() {
               </Typography>
               <Button
                 variant="contained"
-                disabled={
-                  (!canEditWorkflowStage(roles, attStage) && !isAdmin) || !attFile || addAtt.isPending
-                }
+                disabled={!attEdit(attStage) || !attFile || addAtt.isPending}
                 onClick={() => addAtt.mutate()}
               >
                 Upload
@@ -1204,69 +1244,68 @@ export function LineItemWorkspacePage() {
                 </TableHead>
                 <TableBody>
                   {(line.attachments ?? []).map((a) => {
-                    const canManage = canManageAttachment(user?.sub, a, isAdmin);
+                    const canManageFile = canManageAttachment(user?.sub, a, isAdmin);
+                    const canMutate = canManageFile && attEdit(a.stage);
                     return (
                       <TableRow key={a.id}>
                         <TableCell>{STAGE_LABEL[a.stage]}</TableCell>
                         <TableCell sx={{ wordBreak: 'break-word' }}>{a.fileName}</TableCell>
                         <TableCell>{formatBytes(a.sizeBytes)}</TableCell>
                         <TableCell align="right">
-                          {canManage ? (
-                            <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'flex-end' }}>
-                              <Tooltip title="View in new tab">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => viewAtt(a)}
-                                    disabled={viewingId === a.id}
-                                    aria-label="View"
-                                  >
-                                    <VisibilityIcon fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                              <Tooltip title="Edit stage or replace file">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => {
-                                      setEditAtt(a);
-                                      setEditAttStage(a.stage);
-                                      setEditAttFile(null);
-                                    }}
-                                    aria-label="Edit attachment"
-                                  >
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                              <Tooltip title="Delete">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={() => {
-                                      if (
-                                        window.confirm(
-                                          `Delete “${a.fileName}”? This cannot be undone.`,
-                                        )
-                                      ) {
-                                        delAtt.mutate(a.id);
-                                      }
-                                    }}
-                                    disabled={delAtt.isPending}
-                                    aria-label="Delete"
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            </Box>
-                          ) : (
-                            <Typography variant="caption" color="text.secondary">
-                              —
-                            </Typography>
-                          )}
+                          <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'flex-end' }}>
+                            <Tooltip title="View in new tab">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => viewAtt(a)}
+                                  disabled={viewingId === a.id}
+                                  aria-label="View"
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            {canMutate && (
+                              <>
+                                <Tooltip title="Edit stage or replace file">
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => {
+                                        setEditAtt(a);
+                                        setEditAttStage(a.stage);
+                                        setEditAttFile(null);
+                                      }}
+                                      aria-label="Edit attachment"
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                                <Tooltip title="Delete">
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      onClick={() => {
+                                        if (
+                                          window.confirm(
+                                            `Delete “${a.fileName}”? This cannot be undone.`,
+                                          )
+                                        ) {
+                                          delAtt.mutate(a.id);
+                                        }
+                                      }}
+                                      disabled={delAtt.isPending}
+                                      aria-label="Delete"
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                              </>
+                            )}
+                          </Box>
                         </TableCell>
                       </TableRow>
                     );
@@ -1302,7 +1341,7 @@ export function LineItemWorkspacePage() {
                       <MenuItem
                         key={s}
                         value={s}
-                        disabled={!canEditWorkflowStage(roles, s) && !isAdmin}
+                        disabled={!attEdit(s)}
                       >
                         {STAGE_LABEL[s]}
                       </MenuItem>
@@ -1370,7 +1409,7 @@ export function LineItemWorkspacePage() {
                   onChange={(e) =>
                     setForm({ ...form, coordDesignRequestedAt: e.target.value || undefined })
                   }
-                  disabled={!headerOk}
+                  disabled={!coordOk}
                   fullWidth
                 />
                 <TextField
@@ -1384,7 +1423,7 @@ export function LineItemWorkspacePage() {
                       coordEngineeringSubmittedAt: e.target.value || undefined,
                     })
                   }
-                  disabled={!headerOk}
+                  disabled={!coordOk}
                   fullWidth
                 />
               </Stack>
@@ -1395,7 +1434,7 @@ export function LineItemWorkspacePage() {
                 onChange={(e) =>
                   setForm({ ...form, coordApprovalStatus: e.target.value })
                 }
-                disabled={!headerOk}
+                disabled={!coordOk}
               />
               <TextField
                 label="Description"
@@ -1406,12 +1445,12 @@ export function LineItemWorkspacePage() {
                 onChange={(e) =>
                   setForm({ ...form, coordDescription: e.target.value })
                 }
-                disabled={!headerOk}
+                disabled={!coordOk}
               />
               <Button
                 variant="contained"
                 startIcon={<SaveIcon />}
-                disabled={!headerOk || patchM.isPending}
+                disabled={!coordOk || patchM.isPending}
                 onClick={() => patchM.mutate()}
               >
                 Save co-ordination

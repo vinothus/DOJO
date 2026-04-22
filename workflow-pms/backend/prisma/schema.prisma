@@ -28,6 +28,9 @@ enum TripMode {
 
 enum ProjectStatus {
   ACTIVE
+  /// Project work finished (distinct from archive — see ARCHIVED)
+  COMPLETE
+  /// Hidden / cold storage (admin)
   ARCHIVED
 }
 

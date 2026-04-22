@@ -164,6 +164,7 @@ export class LineItemsController {
       dto.targetStage,
       dto.reason,
       dto.version,
+      dto.markProjectComplete,
     );
   }
 

@@ -1,5 +1,7 @@
+import DownloadIcon from '@mui/icons-material/Download';
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Container,
@@ -54,6 +56,16 @@ export function OllsCostPage() {
     enabled: !!user,
   });
 
+  const downloadXlsx = async () => {
+    const res = await api.get('/reports/olls-cost.xlsx', { responseType: 'blob' });
+    const url = window.URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'olls-cost.xlsx';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const barData = (data?.byProject ?? []).map((p) => ({
     name: p.label.length > 14 ? `${p.label.slice(0, 12)}…` : p.label,
     fullName: p.label,
@@ -64,13 +76,35 @@ export function OllsCostPage() {
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Olls cost
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Estimated labor + fuel from man-hours and travel (rate card), plus invoice amounts captured on
-        jobs. Scoped to projects you can access.
-      </Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          justifyContent: 'space-between',
+          gap: 1,
+          mb: 2,
+        }}
+      >
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+            Olls cost
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Estimated labor + fuel from man-hours and travel (rate card), plus invoice on jobs. Admin
+            only — all active projects.
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<DownloadIcon />}
+          onClick={() => void downloadXlsx()}
+          disabled={isLoading}
+        >
+          Download Excel
+        </Button>
+      </Box>
 
       {isLoading && <Typography color="text.secondary">Loading…</Typography>}
 

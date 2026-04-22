@@ -24,6 +24,15 @@ export type WorkspaceTabKey =
   | 'coordination'
   | 'technical';
 
+/**
+ * Per role (slug): which job workspace tabs that role may use.
+ * - `inherit` — use legacy rules (stage visibility + workflow stage edit rights).
+ * - `hidden` — tab not shown for that role (when the role has any tab rules object).
+ * - `view` / `edit` — tab is shown; `view` is read-only.
+ * When a role has a non-empty `roleTabAccess[role]` object, any tab not listed is treated as `hidden`.
+ */
+export type WorkspaceTabAccessMode = 'inherit' | 'hidden' | 'view' | 'edit';
+
 export interface StageHandoverRule {
   requireTravel?: boolean;
   requireBom?: boolean;
@@ -54,6 +63,10 @@ export interface WorkspaceSettingsV1 {
   /** false = tab hidden while line is in this stage */
   stageTabs: Partial<
     Record<WorkflowStage, Partial<Record<WorkspaceTabKey, boolean>>>
+  >;
+  /** e.g. `site_measurement`, `coordinator` — not `admin` (admins always see all). */
+  roleTabAccess?: Partial<
+    Record<string, Partial<Record<WorkspaceTabKey, WorkspaceTabAccessMode>>>
   >;
   stageHandover: Partial<Record<WorkflowStage, StageHandoverRule>>;
   /** Per outgoing handover (from → next stage). Keys: `FROM__TO` */
@@ -91,6 +104,7 @@ export const DEFAULT_WORKSPACE: WorkspaceSettingsV1 = {
   stageTabs: {
     INPUT_SITE_MEASUREMENT: { bom: false },
   },
+  roleTabAccess: {},
   stageHandover: {
     INPUT_SITE_MEASUREMENT: {
       requireTravel: true,
@@ -201,6 +215,19 @@ export function mergeWorkspace(
         }
       }
     }
+    if (o.roleTabAccess && typeof o.roleTabAccess === 'object') {
+      for (const [rk, rv] of Object.entries(
+        o.roleTabAccess as Record<string, unknown>,
+      )) {
+        if (rv && typeof rv === 'object' && !Array.isArray(rv)) {
+          base.roleTabAccess = { ...(base.roleTabAccess ?? {}) };
+          base.roleTabAccess[rk] = {
+            ...(base.roleTabAccess[rk] ?? {}),
+            ...(rv as Record<string, WorkspaceTabAccessMode>),
+          };
+        }
+      }
+    }
   }
   return base;
 }
@@ -259,6 +286,17 @@ export function patchWorkspace(
         out.handoverTransitions[k] = {
           ...(out.handoverTransitions[k] ?? {}),
           ...(v as HandoverTransitionRule),
+        };
+      }
+    }
+  }
+  if (p.roleTabAccess) {
+    for (const [k, v] of Object.entries(p.roleTabAccess)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        out.roleTabAccess = { ...(out.roleTabAccess ?? {}) };
+        out.roleTabAccess[k] = {
+          ...(out.roleTabAccess[k] ?? {}),
+          ...(v as Record<string, WorkspaceTabAccessMode>),
         };
       }
     }

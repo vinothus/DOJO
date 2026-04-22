@@ -1,5 +1,6 @@
 import { PrismaClient, WorkflowStage } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { ensureCoordinationPhaseSample } from './seed-coordination-demo';
 import { ensurePostDeployBootstrap } from './seed-extensions';
 import { ensureSamplePortfolio } from './seed-portfolio';
 import { ensurePetroRabighPortfolio } from './seed-petro-rabigh';
@@ -141,11 +142,12 @@ async function main() {
 
   await ensureSamplePortfolio(prisma, adminUser.id);
   await ensurePetroRabighPortfolio(prisma, adminUser.id);
+  await ensureCoordinationPhaseSample(prisma, adminUser.id);
 
   await ensurePostDeployBootstrap(prisma);
 
   console.log(
-    'Seed OK — portfolio: 9 staged demos + PRJ-GOLD-COMPLETE + Petro Rabigh Yanbu (PRJ-YANBU-2026-*).',
+    'Seed OK — portfolio: 9 staged demos + PRJ-GOLD-COMPLETE + Petro Rabigh Yanbu + PRJ-COORD-2026-DEMO (co-ordination).',
   );
 }
 

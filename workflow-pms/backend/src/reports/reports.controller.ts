@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  ForbiddenException,
   Get,
   Header,
   Query,
@@ -26,7 +27,32 @@ export class ReportsController {
 
   @Get('portfolio-cost')
   portfolioCost(@CurrentUser() user: JwtPayload) {
-    return this.reports.portfolioCostSummary(user.roles);
+    return this.reports.portfolioCostSummary(user.roles, { limitByProject: 24 });
+  }
+
+  @Get('olls-stats.xlsx')
+  ollsStatsXlsx(@CurrentUser() user: JwtPayload) {
+    return this.reports.buildOllsStatsXlsx(user.roles).then(
+      (buf) =>
+        new StreamableFile(buf, {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          disposition: 'attachment; filename=olls-stats.xlsx',
+        }),
+    );
+  }
+
+  @Get('olls-cost.xlsx')
+  ollsCostXlsx(@CurrentUser() user: JwtPayload) {
+    if (!user.roles.includes('admin')) {
+      throw new ForbiddenException('Olls cost export is only available to administrators.');
+    }
+    return this.reports.buildOllsCostXlsx(user.roles).then(
+      (buf) =>
+        new StreamableFile(buf, {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          disposition: 'attachment; filename=olls-cost.xlsx',
+        }),
+    );
   }
 
   @Get('cost-summary')

@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, WorkflowStage } from '@prisma/client';
+import { Prisma, ProjectStatus, WorkflowStage, type LineItem } from '@prisma/client';
 import { createReadStream, existsSync } from 'fs';
 import { unlink } from 'fs/promises';
 import type { Response } from 'express';
@@ -298,6 +298,184 @@ export class LineItemsService {
     }
   }
 
+  private static stableStringifyJson(value: unknown): string {
+    if (value === null || value === undefined) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return `[${value.map((v) => LineItemsService.stableStringifyJson(v)).join(',')}]`;
+    }
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${LineItemsService.stableStringifyJson(o[k])}`)
+      .join(',')}}`;
+  }
+
+  /** Values suitable for JSON audit payload (Prisma Decimals and dates as strings) */
+  private static auditValue(v: unknown): unknown {
+    if (v == null) return v;
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof (v as { toString?: () => string }).toString === 'function') {
+      const ctor = (v as { constructor?: { name?: string } }).constructor?.name;
+      if (ctor === 'Decimal' || ctor === 'Big') return (v as { toString: () => string }).toString();
+    }
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      return v;
+    }
+    return v;
+  }
+
+  private lineSaveDiff(
+    line: LineItem,
+    data: {
+      inputDrawingNumber?: string;
+      drawingNumber?: string;
+      sheetNo?: string;
+      revNo?: string;
+      clampType?: string;
+      material?: string;
+      description?: string;
+      qty?: number;
+      unitWeight?: number;
+      totalWeight?: number;
+      measurementDate?: Date | null;
+      targetDate?: Date | null;
+      currentStage?: WorkflowStage;
+      invoiceAmountSar?: number;
+      technicalDetails?: Record<string, unknown> | null;
+      coordDesignRequestedAt?: Date | null;
+      coordEngineeringSubmittedAt?: Date | null;
+      coordApprovalStatus?: string;
+      coordDescription?: string;
+      version: number;
+    },
+  ): { changes: Record<string, { from: unknown; to: unknown }>; changeSummary: string[] } {
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    const changeSummary: string[] = [];
+    const dateStr = (d: Date | null | undefined) =>
+      d == null ? null : d.toISOString().slice(0, 10);
+    const decStr = (d: { toString: () => string } | null | undefined) =>
+      d == null ? null : d.toString();
+    const numStr = (n: number | null | undefined) =>
+      n == null || (typeof n === 'number' && Number.isNaN(n)) ? null : String(n);
+    const strNorm = (s: string | null | undefined) => {
+      if (s == null) return null;
+      const t = s.trim();
+      return t.length ? t : null;
+    };
+
+    const setStr = (key: keyof LineItem, incoming: string | null | undefined) => {
+      if (incoming === undefined) return;
+      const from = strNorm(line[key] as string | null);
+      const to = strNorm(incoming);
+      if (from === to) return;
+      changes[key] = { from, to };
+      changeSummary.push(String(key));
+    };
+
+    setStr('inputDrawingNumber', data.inputDrawingNumber);
+    setStr('drawingNumber', data.drawingNumber);
+    setStr('sheetNo', data.sheetNo);
+    setStr('revNo', data.revNo);
+    setStr('clampType', data.clampType);
+    setStr('material', data.material);
+    setStr('description', data.description);
+    setStr('coordApprovalStatus', data.coordApprovalStatus);
+    setStr('coordDescription', data.coordDescription);
+
+    if (data.qty !== undefined) {
+      const from = decStr(line.qty);
+      const to = numStr(data.qty);
+      if (from !== to) {
+        changes.qty = { from: LineItemsService.auditValue(line.qty), to: data.qty };
+        changeSummary.push('qty');
+      }
+    }
+    if (data.unitWeight !== undefined) {
+      const from = decStr(line.unitWeight);
+      const to = numStr(data.unitWeight);
+      if (from !== to) {
+        changes.unitWeight = {
+          from: LineItemsService.auditValue(line.unitWeight),
+          to: data.unitWeight,
+        };
+        changeSummary.push('unitWeight');
+      }
+    }
+    if (data.totalWeight !== undefined) {
+      const from = decStr(line.totalWeight);
+      const to = numStr(data.totalWeight);
+      if (from !== to) {
+        changes.totalWeight = {
+          from: LineItemsService.auditValue(line.totalWeight),
+          to: data.totalWeight,
+        };
+        changeSummary.push('totalWeight');
+      }
+    }
+    if (data.invoiceAmountSar !== undefined) {
+      const from = decStr(line.invoiceAmountSar);
+      const to = numStr(data.invoiceAmountSar);
+      if (from !== to) {
+        changes.invoiceAmountSar = {
+          from: LineItemsService.auditValue(line.invoiceAmountSar),
+          to: data.invoiceAmountSar,
+        };
+        changeSummary.push('invoiceAmountSar');
+      }
+    }
+
+    if (data.measurementDate !== undefined) {
+      const a = dateStr(line.measurementDate);
+      const b = dateStr(data.measurementDate);
+      if (a !== b) {
+        changes.measurementDate = { from: a, to: b };
+        changeSummary.push('measurementDate');
+      }
+    }
+    if (data.targetDate !== undefined) {
+      const a = dateStr(line.targetDate);
+      const b = dateStr(data.targetDate);
+      if (a !== b) {
+        changes.targetDate = { from: a, to: b };
+        changeSummary.push('targetDate');
+      }
+    }
+    if (data.coordDesignRequestedAt !== undefined) {
+      const a = dateStr(line.coordDesignRequestedAt);
+      const b = dateStr(data.coordDesignRequestedAt);
+      if (a !== b) {
+        changes.coordDesignRequestedAt = { from: a, to: b };
+        changeSummary.push('coordDesignRequestedAt');
+      }
+    }
+    if (data.coordEngineeringSubmittedAt !== undefined) {
+      const a = dateStr(line.coordEngineeringSubmittedAt);
+      const b = dateStr(data.coordEngineeringSubmittedAt);
+      if (a !== b) {
+        changes.coordEngineeringSubmittedAt = { from: a, to: b };
+        changeSummary.push('coordEngineeringSubmittedAt');
+      }
+    }
+    if (data.currentStage !== undefined && data.currentStage !== line.currentStage) {
+      changes.currentStage = { from: line.currentStage, to: data.currentStage };
+      changeSummary.push('currentStage');
+    }
+    if (data.technicalDetails !== undefined) {
+      const a = line.technicalDetails;
+      const b = data.technicalDetails;
+      if (LineItemsService.stableStringifyJson(a) !== LineItemsService.stableStringifyJson(b)) {
+        changes.technicalDetails = {
+          from: LineItemsService.auditValue(a),
+          to: LineItemsService.auditValue(b),
+        };
+        changeSummary.push('technicalDetails');
+      }
+    }
+
+    return { changes, changeSummary };
+  }
+
   async update(
     id: string,
     roles: string[],
@@ -336,6 +514,7 @@ export class LineItemsService {
 
     await this.assertEdit(roles, line.currentStage);
     const { version, technicalDetails, ...rest } = data;
+    const { changes, changeSummary } = this.lineSaveDiff(line, data);
     const updated = await this.prisma.lineItem.update({
       where: { id },
       data: {
@@ -351,7 +530,13 @@ export class LineItemsService {
         'LineItem',
         id,
         'LINE_SAVE',
-        { stage: line.currentStage, version: updated.version },
+        {
+          stage: line.currentStage,
+          versionBefore: line.version,
+          version: updated.version,
+          changeSummary,
+          changes,
+        },
         actorUserId,
       );
     }
@@ -617,6 +802,7 @@ export class LineItemsService {
     targetStage: WorkflowStage,
     reason: string,
     version: number,
+    markProjectComplete?: boolean,
   ) {
     const line = await this.prisma.lineItem.findUnique({ where: { id } });
     if (!line) throw new NotFoundException('Line item not found');
@@ -626,6 +812,11 @@ export class LineItemsService {
         currentVersion: line.version,
       });
     }
+    if (markProjectComplete && !roles.includes('admin')) {
+      throw new ForbiddenException(
+        'Only administrators can mark the project complete from a stage override.',
+      );
+    }
     await this.assertOverride(roles, targetStage);
 
     const updated = await this.prisma.lineItem.update({
@@ -633,10 +824,19 @@ export class LineItemsService {
       data: { currentStage: targetStage, version: { increment: 1 } },
     });
 
+    if (markProjectComplete) {
+      await this.prisma.project.update({
+        where: { id: line.projectId },
+        data: { status: ProjectStatus.COMPLETE },
+      });
+    }
+
     await this.audit.log('LineItem', id, 'STAGE_OVERRIDE', {
       fromStage: line.currentStage,
       toStage: targetStage,
       reason,
+      markProjectComplete: !!markProjectComplete,
+      projectId: line.projectId,
     }, userId);
 
     return updated;

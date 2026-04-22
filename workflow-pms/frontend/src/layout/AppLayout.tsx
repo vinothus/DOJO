@@ -234,29 +234,31 @@ export function AppLayout() {
                   />
                 </ListItemButton>
               </Tooltip>
-              <Tooltip title="Olls cost" placement="right">
-                <ListItemButton
-                  sx={{
-                    pl: { xs: 1, md: 4 },
-                    py: 0.75,
-                    justifyContent: { xs: 'center', md: 'flex-start' },
-                  }}
-                  selected={location.pathname === '/olls/cost'}
-                  onClick={() => {
-                    nav('/olls/cost');
-                    closeDrawerIfMobile();
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: { xs: 0, md: 36 }, justifyContent: 'center' }}>
-                    <PaidIcon fontSize="small" color="primary" />
-                  </ListItemIcon>
-                  <ListItemText
-                    sx={{ display: { xs: 'none', md: 'block' } }}
-                    primary="Olls cost"
-                    slotProps={{ primary: { variant: 'body2' } }}
-                  />
-                </ListItemButton>
-              </Tooltip>
+              {isAdmin && (
+                <Tooltip title="Olls cost" placement="right">
+                  <ListItemButton
+                    sx={{
+                      pl: { xs: 1, md: 4 },
+                      py: 0.75,
+                      justifyContent: { xs: 'center', md: 'flex-start' },
+                    }}
+                    selected={location.pathname === '/olls/cost'}
+                    onClick={() => {
+                      nav('/olls/cost');
+                      closeDrawerIfMobile();
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: { xs: 0, md: 36 }, justifyContent: 'center' }}>
+                      <PaidIcon fontSize="small" color="primary" />
+                    </ListItemIcon>
+                    <ListItemText
+                      sx={{ display: { xs: 'none', md: 'block' } }}
+                      primary="Olls cost"
+                      slotProps={{ primary: { variant: 'body2' } }}
+                    />
+                  </ListItemButton>
+                </Tooltip>
+              )}
             </List>
           </Collapse>
         </List>

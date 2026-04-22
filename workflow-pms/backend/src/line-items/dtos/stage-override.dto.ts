@@ -1,5 +1,5 @@
 import { WorkflowStage } from '@prisma/client';
-import { IsEnum, IsInt, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class StageOverrideDto {
   @IsEnum(WorkflowStage)
@@ -11,4 +11,9 @@ export class StageOverrideDto {
 
   @IsInt()
   version!: number;
+
+  /** When true (admin only), set project to Complete after the stage change (not the same as Archive) */
+  @IsOptional()
+  @IsBoolean()
+  markProjectComplete?: boolean;
 }

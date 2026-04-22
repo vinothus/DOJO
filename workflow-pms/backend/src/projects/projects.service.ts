@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma, ProjectStatus, WorkflowStage } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ProjectStatus, WorkflowStage } from '@prisma/client';
 import { isAdmin, stagesForRoles } from '../common/role-workflow';
 
 @Injectable()
@@ -36,14 +36,16 @@ export class ProjectsService {
     /** Lets non-admin creators see projects they created before any line exists. */
     userId?: string,
   ) {
-    const activeOnly =
-      !includeArchived || !isAdmin(roleSlugs)
-        ? { status: ProjectStatus.ACTIVE }
-        : {};
+    /** Not archived: active work + complete (but not cold-storage archive) */
+    const notArchived: Prisma.ProjectWhereInput = {
+      status: { in: [ProjectStatus.ACTIVE, ProjectStatus.COMPLETE] },
+    };
+    const listFilter: Prisma.ProjectWhereInput =
+      !includeArchived || !isAdmin(roleSlugs) ? notArchived : {};
 
     if (isAdmin(roleSlugs)) {
       const rows = await this.prisma.project.findMany({
-        where: activeOnly,
+        where: listFilter,
         orderBy: { updatedAt: 'desc' },
         include: {
           _count: { select: { lineItems: true } },
@@ -62,7 +64,7 @@ export class ProjectsService {
     }
     const rows = await this.prisma.project.findMany({
       where: {
-        ...activeOnly,
+        ...listFilter,
         OR: [
           { lineItems: { some: { currentStage: { in: stages } } } },
           ...(userId ? [{ createdById: userId }] : []),

@@ -1,5 +1,7 @@
+import DownloadIcon from '@mui/icons-material/Download';
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Container,
@@ -95,14 +97,46 @@ export function OllsStatsPage() {
 
   const loading = dLoading || pLoading;
 
+  const downloadXlsx = async () => {
+    const res = await api.get('/reports/olls-stats.xlsx', { responseType: 'blob' });
+    const url = window.URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'olls-stats.xlsx';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Olls statistics
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Portfolio overview: job counts by workflow stage and by project.
-      </Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          justifyContent: 'space-between',
+          gap: 1,
+          mb: 2,
+        }}
+      >
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+            Olls statistics
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Portfolio overview: job counts by workflow stage and by project.
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<DownloadIcon />}
+          onClick={() => void downloadXlsx()}
+          disabled={loading}
+        >
+          Download Excel
+        </Button>
+      </Box>
 
       {loading && <Typography color="text.secondary">Loading…</Typography>}
 
